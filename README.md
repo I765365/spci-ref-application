@@ -149,7 +149,7 @@ npm install -g @sap/cds-dk
 ## Install the skill
 
 ```sh
-npx skills add I765365/spci-content-operator-skills --skill spci-impl
+npx skills add I765365/co-spci --skill spci-impl
 ```
 
 Then open Claude Code in your project folder and type `/spci-impl` to scaffold the full service.
