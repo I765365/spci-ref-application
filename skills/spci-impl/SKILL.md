@@ -14,6 +14,45 @@ Read this skill top-to-bottom before writing any code. Sections 1–5 are langua
 
 ---
 
+## Prerequisites
+
+### General (all languages)
+
+| Requirement | Notes |
+|---|---|
+| **HTTP framework** | Capable of handling `multipart/form-data` file uploads (e.g., Express, FastAPI, Spring Boot, gin) |
+| **ZIP library** | Able to read and iterate entries of a ZIP archive without extracting to disk (e.g., adm-zip, Python `zipfile`, `java.util.zip`, Go `archive/zip`) |
+| **Relational database** | SQLite (local dev), PostgreSQL, or SAP HANA. Must support `INSERT OR IGNORE` / upsert semantics for duplicate handling |
+| **UUID generation** | Standard library or a small dependency |
+| **File system access** | Writable `uploads/` directory for storing uploaded ZIPs |
+| **`jq`** | Required to run the curl test commands in Section 9 (`brew install jq` / `apt install jq`) |
+
+### Node.js / SAP CAP (Section 6)
+
+| Requirement | Version | Install |
+|---|---|---|
+| **Node.js** | ≥ 18 | [nodejs.org](https://nodejs.org) |
+| **@sap/cds-dk** | ≥ 7 (global) | `npm install -g @sap/cds-dk` |
+| **npm** | ≥ 9 | Bundled with Node.js |
+
+Verify your setup:
+
+```sh
+node --version     # v18+
+cds --version      # @sap/cds-dk 7+
+```
+
+> If `cds` is not found, run `npm install -g @sap/cds-dk` and ensure your npm global bin is on `PATH`.
+
+### For testing (Section 10)
+
+| Requirement | Install |
+|---|---|
+| **jest** | `npm install --save-dev jest` |
+| **supertest** | `npm install --save-dev supertest` |
+
+---
+
 ## 1. Core concepts
 
 | Concept | Description |
