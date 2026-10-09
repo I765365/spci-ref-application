@@ -1,6 +1,6 @@
 ---
 name: spci-impl
-description: Complete blueprint for building a content-package import service (SPCI pattern) in any language. Covers the language-neutral API contract, database schema, library substitution guide, a Node.js/SAP CAP reference implementation, an optional two-column data-viewer frontend, test ZIP generation, and extension guides.
+description: Complete blueprint for building a content-package import service (SPCI pattern) in any language. Covers the language-neutral API contract, database schema, library substitution guide, a Node.js/SAP CAP reference implementation, an optional two-column data-viewer frontend, test ZIP generation, a full test-case suite (checklist, negative curls, Jest/supertest), and extension guides.
 category: Development
 tags: [CAP, Node.js, REST, SAP BTP, ZIP import, content package, SPCI]
 trigger: spci, content package import, ZIP import service, SPCI pattern
@@ -1261,13 +1261,299 @@ curl -X POST http://localhost:<port>/spci/v1/contentPackages \
 
 ---
 
-## 10. Adding a new endpoint
+## 10. Test cases
+
+### 10.1 Test checklist (language-neutral)
+
+Verify every behavior in the table before considering the service production-ready.
+
+| # | Area | Input | Expected |
+|---|---|---|---|
+| 1 | Health | `GET /health` | 200 `{ status: "OK", timestamp: "…" }` |
+| 2 | Upload — missing file | POST /files, no `file` field | 400 code `1001` |
+| 3 | Upload — non-ZIP | POST /files with `.txt` | 400 code `1002` |
+| 4 | Upload — oversized | POST /files > 50 MB | 400 code `1003` |
+| 5 | Upload — valid ZIP | POST /files `sample-package.zip` | 201 `{ "id": "<uuid>" }` |
+| 6 | File GET — found | GET /files/:id | 200 with `uri`, `processingStatus` |
+| 7 | File GET — not found | GET /files/nonexistent | 404 code `1004` |
+| 8 | File DELETE — found | DELETE /files/:id | 204, file removed from disk |
+| 9 | File DELETE — not found | DELETE /files/nonexistent | 404 code `1004` |
+| 10 | Package create — missing `name` | POST without `name` | 400 code `1001` |
+| 11 | Package create — invalid `location.type` | `"DISK"` | 400 code `2003` |
+| 12 | Package create — missing `location` | no `location` field | 400 code `2004` |
+| 13 | Package create — LOCAL + URL URI | `type:LOCAL`, `uri:"https://…"`, no `contentAsReference` header | 400 code `2010` |
+| 14 | Package create — REMOTE + UUID URI | `type:REMOTE`, `uri:"file:abc"` | 400 code `2010` |
+| 15 | Package create — duplicate | same `name`+`version` twice | 200 on second call, re-processes |
+| 16 | Package status — full lifecycle | poll after create | `INITIAL → PROCESSING → SUCCESS` |
+| 17 | Package delete — while PROCESSING | DELETE when `status=PROCESSING` | 422 code `2007` |
+| 18 | Package delete — cascades | DELETE after SUCCESS | 204, logs + resources + domain rows removed |
+| 19 | Package delete — not found | DELETE /contentPackages/nonexistent | 404 code `2002` |
+| 20 | Data endpoint — known entity | GET /data/Incidents after import | 200 `{ entity, count, rows }` |
+| 21 | Data endpoint — unknown entity | GET /data/UnknownThing | 404 code `2009` |
+| 22 | Tenant isolation | Upload with `tenant-A`, query with `tenant-B` | 404 for file, empty rows for data |
+| 23 | Logs endpoint | GET /contentPackages/:id/logs after SUCCESS | 200 `{ messages: [{severity:"INFO",…}] }` |
+
+---
+
+### 10.2 Negative test curls
+
+Run these after `node scripts/create-test-package.mjs` and starting the server.
+
+```sh
+PORT=4004   # adjust if different
+
+# ─── File upload errors ──────────────────────────────────────────────────────
+
+# 1. Missing file field → 400 code 1001
+curl -s -X POST http://localhost:$PORT/spci/v1/files \
+  -H "sap-sender-tenant-id: local-tenant" | jq .
+
+# 2. Non-ZIP file → 400 code 1002
+echo "not a zip" > /tmp/test.txt
+curl -s -X POST http://localhost:$PORT/spci/v1/files \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -F "file=@/tmp/test.txt" | jq .
+
+# 3. File not found → 404 code 1004
+curl -s http://localhost:$PORT/spci/v1/files/00000000-0000-0000-0000-000000000000 \
+  -H "sap-sender-tenant-id: local-tenant" | jq .
+
+# ─── Package validation errors ───────────────────────────────────────────────
+
+# 4. Missing name → 400
+curl -s -X POST http://localhost:$PORT/spci/v1/contentPackages \
+  -H "Content-Type: application/json" \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -d '{"version":"1.0","type":"workflow","location":{"type":"LOCAL","uri":"file:abc"}}' | jq .
+
+# 5. Invalid location.type → 400 code 2003
+curl -s -X POST http://localhost:$PORT/spci/v1/contentPackages \
+  -H "Content-Type: application/json" \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -d '{"name":"T","version":"1","type":"workflow","location":{"type":"DISK","uri":"file:abc"}}' | jq .
+
+# 6. REMOTE type with non-URL uri → 400 code 2010
+curl -s -X POST http://localhost:$PORT/spci/v1/contentPackages \
+  -H "Content-Type: application/json" \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -d '{"name":"T","version":"1","type":"workflow","location":{"type":"REMOTE","uri":"file:abc"}}' | jq .
+
+# 7. Package not found → 404 code 2002
+curl -s http://localhost:$PORT/spci/v1/contentPackages/nonexistent \
+  -H "sap-sender-tenant-id: local-tenant" | jq .
+
+# ─── Data endpoint errors ────────────────────────────────────────────────────
+
+# 8. Unknown entity → 404 code 2009
+curl -s http://localhost:$PORT/spci/v1/data/UnknownEntity \
+  -H "sap-sender-tenant-id: local-tenant" | jq .
+
+# ─── Tenant isolation ────────────────────────────────────────────────────────
+
+# 9. Upload with tenant-A, then read with tenant-B → 404
+FILE_ID=$(curl -s -X POST http://localhost:$PORT/spci/v1/files \
+  -H "sap-sender-tenant-id: tenant-A" \
+  -F "file=@./test-data/sample-package.zip" | jq -r .id)
+
+curl -s http://localhost:$PORT/spci/v1/files/$FILE_ID \
+  -H "sap-sender-tenant-id: tenant-B" | jq .
+# Expected: { "error": { "code": "1004", … } }
+
+# ─── Duplicate / upsert ──────────────────────────────────────────────────────
+
+# 10. Upload ZIP, create package, then create again with same name+version
+#     Second call must return 200 (not 201) and re-process to SUCCESS
+FILE_ID=$(curl -s -X POST http://localhost:$PORT/spci/v1/files \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -F "file=@./test-data/sample-package.zip" | jq -r .id)
+
+curl -s -X POST http://localhost:$PORT/spci/v1/contentPackages \
+  -H "Content-Type: application/json" \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -d "{\"name\":\"Dup\",\"version\":\"1.0\",\"type\":\"workflow\",\"location\":{\"type\":\"LOCAL\",\"uri\":\"file:$FILE_ID\"}}" | jq .
+
+curl -s -X POST http://localhost:$PORT/spci/v1/contentPackages \
+  -H "Content-Type: application/json" \
+  -H "sap-sender-tenant-id: local-tenant" \
+  -d "{\"name\":\"Dup\",\"version\":\"1.0\",\"type\":\"workflow\",\"location\":{\"type\":\"LOCAL\",\"uri\":\"file:$FILE_ID\"}}" | jq .
+# Expected: same id returned, status eventually SUCCESS again
+```
+
+---
+
+### 10.3 Node.js — Jest + supertest
+
+**Install:**
+
+```sh
+npm install --save-dev jest supertest
+```
+
+**`package.json` additions:**
+
+```json
+{
+  "scripts": {
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit"
+  },
+  "jest": {
+    "transform": {},
+    "extensionsToTreatAsEsm": [".js"]
+  }
+}
+```
+
+**`tests/setup.js`** — point CDS at an in-memory SQLite database so tests run without a real DB:
+
+```js
+process.env.CDS_ENV         = 'test';
+process.env.CDS_DB_KIND     = 'sqlite';
+process.env.CDS_DB_DATABASE = ':memory:';
+```
+
+**`tests/health.test.js`:**
+
+```js
+import request from 'supertest';
+import express from 'express';
+
+const app = express();
+app.use(express.json());
+app.get('/spci/v1/health', (req, res) =>
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() })
+);
+
+test('GET /health returns 200 OK', async () => {
+  const res = await request(app).get('/spci/v1/health');
+  expect(res.status).toBe(200);
+  expect(res.body.status).toBe('OK');
+  expect(typeof res.body.timestamp).toBe('string');
+});
+```
+
+**`tests/files.test.js`** — requires the app to export a factory function `buildApp()`:
+
+```js
+import request from 'supertest';
+import { buildApp } from '../srv/server.js';
+
+let app;
+beforeAll(async () => { app = await buildApp(); });
+
+describe('POST /files', () => {
+  it('400 when no file is attached', async () => {
+    const res = await request(app)
+      .post('/spci/v1/files')
+      .set('sap-sender-tenant-id', 'local-tenant');
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('1001');
+  });
+
+  it('400 for a non-ZIP file', async () => {
+    const res = await request(app)
+      .post('/spci/v1/files')
+      .set('sap-sender-tenant-id', 'local-tenant')
+      .attach('file', Buffer.from('not a zip'), { filename: 'test.txt', contentType: 'text/plain' });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('1002');
+  });
+
+  it('201 with UUID id for a valid ZIP', async () => {
+    const res = await request(app)
+      .post('/spci/v1/files')
+      .set('sap-sender-tenant-id', 'local-tenant')
+      .attach('file', 'test-data/sample-package.zip');
+    expect(res.status).toBe(201);
+    expect(res.body.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-/);
+  });
+});
+
+describe('GET /files/:id', () => {
+  it('404 for unknown file id', async () => {
+    const res = await request(app)
+      .get('/spci/v1/files/00000000-0000-0000-0000-000000000000')
+      .set('sap-sender-tenant-id', 'local-tenant');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('1004');
+  });
+});
+```
+
+**`tests/packages.test.js`:**
+
+```js
+import request from 'supertest';
+import { buildApp } from '../srv/server.js';
+
+let app;
+beforeAll(async () => { app = await buildApp(); });
+
+describe('POST /contentPackages', () => {
+  it('400 when name is missing', async () => {
+    const res = await request(app)
+      .post('/spci/v1/contentPackages')
+      .set('Content-Type', 'application/json')
+      .set('sap-sender-tenant-id', 'local-tenant')
+      .send({ version: '1.0', type: 'workflow', location: { type: 'LOCAL', uri: 'file:abc' } });
+    expect(res.status).toBe(400);
+  });
+
+  it('400 for invalid location.type', async () => {
+    const res = await request(app)
+      .post('/spci/v1/contentPackages')
+      .set('Content-Type', 'application/json')
+      .set('sap-sender-tenant-id', 'local-tenant')
+      .send({ name: 'T', version: '1', type: 'workflow', location: { type: 'DISK', uri: 'file:abc' } });
+    expect(res.status).toBe(400);
+    expect(res.body.error.code).toBe('2003');
+  });
+
+  it('404 for unknown package id', async () => {
+    const res = await request(app)
+      .get('/spci/v1/contentPackages/nonexistent')
+      .set('sap-sender-tenant-id', 'local-tenant');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('2002');
+  });
+});
+
+describe('GET /data/:entity', () => {
+  it('404 for an unknown entity', async () => {
+    const res = await request(app)
+      .get('/spci/v1/data/UnknownThing')
+      .set('sap-sender-tenant-id', 'local-tenant');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('2009');
+  });
+});
+```
+
+**Expose `buildApp()` from `server.js` so tests can import it:**
+
+```js
+// srv/server.js — add this export alongside the existing cds.on('bootstrap') block
+export async function buildApp() {
+  const express = (await import('express')).default;
+  const { SPCIImpl } = await import('./spci-impl.js');
+  const app = express();
+  app.use(express.json());
+  app.use(express.urlencoded({ extended: true }));
+  app.use('/spci/v1', new SPCIImpl().getRouter());
+  return app;
+}
+```
+
+> Run `npm test` — all tests should pass against the in-memory SQLite database.
+
+---
+
+## 11. Adding a new endpoint
 
 1. Register the route (before `getRouter()` / equivalent in your framework).
 2. Implement the handler — always scope DB queries to `tenantId`, always return `{ error: { code, message, details } }` on failure.
 3. File-upload routes need the multipart middleware applied before the handler.
 
-## 11. Adding a new importable data type
+## 12. Adding a new importable data type
 
 1. Add the DB table / entity to your schema.
 2. Add `'<FileName>': '<tableName>'` to **both** the table map (in both processing methods) and to the viewable-entities lookup.
