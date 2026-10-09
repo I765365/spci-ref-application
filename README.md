@@ -6,7 +6,7 @@ A Claude Code skill blueprint for implementing a **ContentRuntime** service usin
 
 ## What is Content Provisioning?
 
-[SAP Unified Provisioning](https://pages.github.tools.sap/atom-cfs/atom-docs/docs/product-concepts/provisioning/about-content-provisioning/) treats content entities the same way it treats tenants and integrations: as desired-state resources defined in a BTP Blueprint or a `ManagedService`. The **Unified Resource Manager (URM)** manages that desired state and exposes it through a common API.
+SAP Unified Provisioning treats content entities the same way it treats tenants and integrations: as desired-state resources defined in a BTP Blueprint or a `ManagedService`. The **Unified Resource Manager (URM)** manages that desired state and exposes it through a common API.
 
 ### The Content Operator
 
@@ -243,6 +243,5 @@ curl -s http://localhost:$PORT/spci/v1/data/Incidents \
 
 ## Related links
 
-- [About Content Provisioning — atom-docs](https://pages.github.tools.sap/atom-cfs/atom-docs/docs/product-concepts/provisioning/about-content-provisioning/)
 - [SPCI API spec](https://pages.github.tools.sap/content-propagation-service/cps-api/api/spci.html)
 - [SAP AI Skills Library](https://skills.cloud.sap)
