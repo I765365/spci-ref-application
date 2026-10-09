@@ -1,6 +1,6 @@
 # SPCI Content Operator Skill
 
-A Claude Code skill blueprint for implementing a **ContentRuntime** service using the SAP Service Provider Content Interface (SPCI). The generated service acts as the SPCI endpoint that the SAP Content Operator calls to deploy content packages.
+A Claude Code skill blueprint for implementing a **ContentRuntime** service using the SAP SAAS Provider Content Interface (SPCI). The generated service acts as the SPCI endpoint that the SAP Content Operator calls to deploy content packages.
 
 ---
 
@@ -25,9 +25,9 @@ BTP Blueprint / ManagedService
         │  calls SPCI API
         ▼
   ContentRuntime  ◄── This is the service this skill builds
-        │  extracts ZIP, imports rows into DB
-        ▼
-  Content Runtime Tenant (database)
+           extracts ZIP, imports rows into DB
+        
+
 ```
 
 ### How ContentPackage resources are created
@@ -246,4 +246,3 @@ curl -s http://localhost:$PORT/spci/v1/data/Incidents \
 - [About Content Provisioning — atom-docs](https://pages.github.tools.sap/atom-cfs/atom-docs/docs/product-concepts/provisioning/about-content-provisioning/)
 - [SPCI API spec](https://pages.github.tools.sap/content-propagation-service/cps-api/api/spci.html)
 - [SAP AI Skills Library](https://skills.cloud.sap)
-- [SAP CAP documentation](https://cap.cloud.sap/docs/)
